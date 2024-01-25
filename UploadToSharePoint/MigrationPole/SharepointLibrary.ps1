@@ -10,21 +10,21 @@ class SharepointLibrary {
     [securestring]    $securePassword
     [pscredential]    $credential = $null
     [string]    $context = $Null
-    [string]    $siteURL =  $null
+    [string]    $sharePointFolderPath =  $null
     [string]    $logfilePath = $null
     [string]    $libraryName
     [Microsoft.SharePoint.Client.SecurableObject] $web
-
+    [PnP.PowerShell.Commands.Base.PnPConnection] $connection
     # Constructeur 
     SharepointLibrary(
         [string] $userName,
         [string] $myPswd,
-        [String] $siteURL,
+        [String] $sharePointFolderPath,
         [string] $logFilePath
          ) {
 
         $this.username = $userName
-        $this.siteURL = $SiteURL
+        $this.sharePointFolderPath = $sharePointFolderPath
         $this.logfilePath = $logFilePath 
         $this.securePassword = ConvertTo-SecureString -String $myPswd -AsPlainText -Force
     }
@@ -37,9 +37,9 @@ class SharepointLibrary {
     [bool] openConnection() {
         try {
             $this.credential = New-Object -TypeName System.Management.Automation.PSCredential -argumentlist $this.userName, $this.securePassword
-            Connect-PnPOnline -Url $this.siteURL -Credentials $this.credential #-Interactive 
+            $this.connection = Connect-PnPOnline -Url $this.sharePointFolderPath -Credentials $this.credential -ReturnConnection #-Interactive 
             $this.Web = Get-PnPWeb;
-            $message = " connected with "+ $this.username
+            $message = " connected with "+ $this.username + " to "+ $this.sharePointFolderPath
             $this.writeMessage($message, [colorText]::Green) 
             return $true
         }
@@ -60,57 +60,26 @@ class SharepointLibrary {
         return $true;
     }
 
-   [bool] checkSPOFolderExists([string] $FolderRelativeURL) {
-        
-        Try {    
-            #Setup the context
-            $Ctx = New-Object Microsoft.SharePoint.Client.ClientContext($this.SiteURL)
-            $Ctx.Credentials = $this.credential
- 
-            #Get the Web
-            $this.Web = $Ctx.Web
-            $Ctx.Load($this.Web)
-            $Ctx.ExecuteQuery()
-     
-            #Check Folder Exists
-            Try {
-                $Folder = $this.Web.GetFolderByServerRelativeUrl($FolderRelativeURL)
-                $Ctx.Load($Folder)
-                $Ctx.ExecuteQuery()
-     
-                $message = "Folder Exists!"
-                $this.writeMessage($message,[colorText]::Black)
-                return $true
-            }
-            Catch {
-                $message = "Folder Doesn't Exist!"+$_.Exception.Message
-                $this.writeMessage($message, [colorText]::Yellow)
-                return $false
-            }       
-        }
-        Catch {
-            $message = "Error: Checking Folder Exists!"+$_.Exception.Message
-            $this.writeMessage($message, [colorText]::Red)
-            return $false
-        }
-    }
-
     <######################################################################################>
-    <###### Methode uploadFile                                                       ######>
+    <###### Methode AddFileToSharePoint                                              ######>
     <###### Param: fileManaged                                                       ######>
     <######        destinationFolder                                                 ######>
     <######################################################################################>
 
-    [bool] uploadFile(
-        [PSCustomObject] $fileManaged,
+    [bool] AddFileToSharePoint(
+        [System.IO.FileInfo] $fileManaged,
         [String] $destinationfolder
     ) {
         #Upload File
         try {
             If($destinationfolder.StartsWith("/")) {$destinationfolder = $destinationfolder.Remove(0,1) }
-                $File  = Add-PnPFile -Path $fileManaged.FullName -Folder $destinationfolder 
+                $File  = Add-PnPFile -Path $fileManaged.FullName -Folder $destinationfolder -Connection $this.connection
                  #possible use-> $file itself isnt null if failed, but $file.UniqueId would be null if failed
-                if ($File.UniqueId ) { return $True }
+
+                if ($File.UniqueId ) { 
+                    $message = "The file $($fileManaged.Name) has been added to SharePoint in folder $($destinationfolder)."
+                    $this.writeMessage($message, [colorText]::Green)
+                    return $True }
                 else { return $false  } 
             }
         catch {
@@ -118,25 +87,7 @@ class SharepointLibrary {
             writeMessage($message, [colorText]::Red)
             return $False
         }      
-
- <#       try {
-            If($destinationFolderURL.StartsWith("/")) {$destinationFolderURL = $destinationFolderURL.Remove(0,1) }
-                $File  = Add-PnPFile -Path $sourceFile.FullName -Folder $destinationFolderURL 
-                 #possible use-> $file itself isnt null if failed, but $file.UniqueId would be null if failed
-                if ($File.UniqueId ) {
-                    Write-host "Uploaded File '$(sourceFile.FullName)' to Folder $($destinationFolderURL)"
-                    Add-content  $this.logFilePath -value "Uploaded File '$(sourceFile.FullName)' to Folder $($destinationFolderURL)" 
-                    return $True
-                }
-                else { 
-                    return $false
-                } 
-            }
-        catch {
-            Write-host "*********  failed to upload file '$(sourceFile.FullName)' to Folder $($destinationFolderURL) **********"
-            Add-content $this.logFilePath -value "**********  Failed to Upload File '$(sourceFile.FullName)' to Folder $($destinationFolderURL)********" 
-            return $False
-        } #>     
+ 
     }  
 
     [void] uploadDirectory(
@@ -206,16 +157,25 @@ class SharepointLibrary {
 
 
         # Method to compare files
-    [void] CompareFiles() {
-        
-        # Connect to SharePoint
-        Connect-PnPOnline -Url $this.siteUrl -Interactive
+    [void] CompareFiles(
+        [string] $localFolderPath,
+        [string] $libraryName,
+        [string] $SubFolder
+    ) {
+        [Int] $fileToUpload = 0
 
         # Get the list of files in the SharePoint folder
-        $sharePointFiles = Get-PnPFolderItem -FolderSiteRelativeUrl $this.sharePointFolderPath -ItemType File
+        $sharePointFiles = Get-PnPFolderItem -FolderSiteRelativeUrl $this.sharePointFolderPath -ItemType File -Connection $this.connection
+
+        $this.Web = Get-PnPWeb
+        $List = Get-PnPList $libraryName -Includes RootFolder
+        $targetFolder = $list.RootFolder
+        $targetFolderSiteRelativeURL = $targetFolder.ServerRelativeURL.Replace($this.Web.ServerRelativeUrl,[string]::Empty)
+        $targetFolderSiteRelativeURL = $targetFolderSiteRelativeURL + “/" + $SubFolder
+
 
         # Go through each local file
-        Get-ChildItem -Path $this.localFolderPath -File | ForEach-Object {
+        Get-ChildItem -Path $localFolderPath -File | ForEach-Object {
             $localFile = $_
             
             # Search for the corresponding file on SharePoint
@@ -234,21 +194,13 @@ class SharepointLibrary {
             } else {
                 $message = "The file $($localFile.Name) does not exist on SharePoint. Adding the file to SharePoint..."
                 $this.writeMessage($message, [colorText]::Yellow)
-                $this.AddFileToSharePoint($localFile)
+                $fileToUpload++
+                $this.AddFileToSharePoint($localFile,$targetFolderSiteRelativeURL)
             }
         }
-
+        $this.writeMessage("$fileToUpload Files need to be uploaded ",[ColorText]::Yellow) 
         # Disconnect from SharePoint
         Disconnect-PnPOnline
-    }
-
-     # Method to add a file to SharePoint
-    [void] AddFileToSharePoint([System.IO.FileInfo] $localFile) {
-      # Add the file to SharePoint
-     Add-PnPFile -Path $localFile.FullName -Folder $this.sharePointFolderPath
-     $message = "The file $($localFile.Name) has been added to SharePoint."
-     $this.writeMessage($message, [colorText]::Green)
-   
     }
 
     [void] writeMessage(
@@ -259,6 +211,41 @@ class SharepointLibrary {
             Write-Host $message -ForegroundColor $colorText
       }
 
+      [bool] checkSPOFolderExists([string] $FolderRelativeURL) {
+        
+        Try {    
+            #Setup the context
+            $Ctx = New-Object Microsoft.SharePoint.Client.ClientContext($this.sharePointFolderPath)
+            $Ctx.Credentials = $this.credential
+ 
+            #Get the Web
+            $this.Web = $Ctx.Web
+            $Ctx.Load($this.Web)
+            $Ctx.ExecuteQuery()
+     
+            #Check Folder Exists
+            Try {
+                $Folder = $this.Web.GetFolderByServerRelativeUrl($FolderRelativeURL)
+                $Ctx.Load($Folder)
+                $Ctx.ExecuteQuery()
+     
+                $message = "Folder Exists!"
+                $this.writeMessage($message,[colorText]::Black)
+                return $true
+            }
+            Catch {
+                $message = "Folder Doesn't Exist!"+$_.Exception.Message
+                $this.writeMessage($message, [colorText]::Yellow)
+                return $false
+            }       
+        }
+        Catch {
+            $message = "Error: Checking Folder Exists!"+$_.Exception.Message
+            $this.writeMessage($message, [colorText]::Red)
+            return $false
+        }
+    }
+
 }
 
 $toto = [SharepointLibrary]::new('admin-ld@ice-wm.com', 'C3rt0dL0ICE$', 'https://icewm.sharepoint.com/sites/PleTst-POC', "C:\Tmp\Migration-LOG.log" );
@@ -267,4 +254,5 @@ $toto = [SharepointLibrary]::new('admin-ld@ice-wm.com', 'C3rt0dL0ICE$', 'https:/
 
 $toto.openConnection()
 #$toto.getFilesListFrom("DataExport")  
-$toto.uploadDirectory("C:\ESD","Documents","DataExport")
+#$toto.uploadDirectory("C:\ESD","Documents","DataExport")
+$toto.CompareFiles("C:\ESD","Documents","DataExport")
