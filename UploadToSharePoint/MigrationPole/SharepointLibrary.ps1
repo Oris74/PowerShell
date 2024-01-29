@@ -38,7 +38,7 @@ class SharepointLibrary {
         try {
             $this.credential = New-Object -TypeName System.Management.Automation.PSCredential -argumentlist $this.userName, $this.securePassword
             $this.connection = Connect-PnPOnline -Url $this.sharePointFolderPath -Credentials $this.credential -ReturnConnection #-Interactive 
-            $this.Web = Get-PnPWeb;
+            $this.Web = Get-PnPWeb -Connection $this.connection
             $message = " connected with "+ $this.username + " to "+ $this.sharePointFolderPath
             $this.writeMessage($message, [colorText]::Green) 
             return $true
@@ -167,8 +167,8 @@ class SharepointLibrary {
         # Get the list of files in the SharePoint folder
         $sharePointFiles = Get-PnPFolderItem -FolderSiteRelativeUrl $this.sharePointFolderPath -ItemType File -Connection $this.connection
 
-        $this.Web = Get-PnPWeb
-        $List = Get-PnPList $libraryName -Includes RootFolder
+        $this.Web = Get-PnPWeb -Connection $this.connection
+        $List = Get-PnPList $libraryName -Includes RootFolder -Connection $this.connection
         $targetFolder = $list.RootFolder
         $targetFolderSiteRelativeURL = $targetFolder.ServerRelativeURL.Replace($this.Web.ServerRelativeUrl,[string]::Empty)
         $targetFolderSiteRelativeURL = $targetFolderSiteRelativeURL + “/" + $SubFolder
