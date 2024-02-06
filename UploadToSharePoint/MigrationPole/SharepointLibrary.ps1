@@ -67,23 +67,24 @@ class SharepointLibrary {
     <######################################################################################>
 
     [bool] AddFileToSharePoint(
-        [System.IO.FileInfo] $fileManaged,
-        [String] $destinationfolder
+        [string] $fileManaged,
+        [String] $destinationFolder
     ) {
         #Upload File
         try {
-            If($destinationfolder.StartsWith("/")) {$destinationfolder = $destinationfolder.Remove(0,1) }
-                $File  = Add-PnPFile -Path $fileManaged.FullName -Folder $destinationfolder -Connection $this.connection
+            If($destinationFolder.StartsWith("/")) {$destinationFolder = $destinationFolder.Remove(0,1) }
+                $fileStatus  = Add-PnPFile -Path $fileManaged -Folder $destinationFolder -Connection $this.connection
                  #possible use-> $file itself isnt null if failed, but $file.UniqueId would be null if failed
+               
 
-                if ($File.UniqueId ) { 
-                    $message = "The file $($fileManaged.Name) has been added to SharePoint in folder $($destinationfolder)."
+                if ($fileStatus.UniqueId ) { 
+                    $message = "The file $($fileManaged) has been added to SharePoint in folder $($destinationfolder)."
                     $this.writeMessage($message, [colorText]::Green)
                     return $True }
                 else { return $false  } 
             }
         catch {
-            $message = "Error : *********  failed to upload file '$($fileManaged.FullName)' to Folder $($destinationFolder) **********"
+            $message = "Error : *********  failed to upload file '$($fileManaged)' to Folder $($destinationFolder) **********"
             writeMessage($message, [colorText]::Red)
             return $False
         }      
@@ -100,42 +101,42 @@ class SharepointLibrary {
                 $this.writeMessage($message, [ColorText]::Black)
                  
                 #Get the Target Folder to Upload
-                $this.Web = Get-PnPWeb
-                $List = Get-PnPList $LibraryName -Includes RootFolder
+                $this.Web = Get-PnPWeb -Connection $this.connection
+                $List = Get-PnPList $LibraryName -Includes RootFolder -Connection $this.connection
                 $targetFolder = $list.RootFolder
                 $targetFolderSiteRelativeURL = $targetFolder.ServerRelativeURL.Replace($this.Web.ServerRelativeUrl,[string]::Empty)
                 $targetFolderSiteRelativeURL = $targetFolderSiteRelativeURL + “/" + $SubFolder
                 #Get All Items from the Source
-                $source = Get-ChildItem -Path $localFolderPath -Recurse
-                $sourceItems = $Source | Select-Object FullName, PSIsContainer, LastWriteTime,  @{Label='TargetItemURL';Expression={$_.FullName.Replace($localFolderPath,$TargetFolderSiteRelativeURL).Replace("\","/")}}
+                $sourceFiles = Get-ChildItem -Path $localFolderPath -Recurse
+                $Files = $sourceFiles | Select-Object Name,FullName, PSIsContainer, LastWriteTime,  @{Label='TargetItemURL';Expression={$_.FullName.Replace($localFolderPath,$TargetFolderSiteRelativeURL).Replace("\","/")}}
                 
-                $message = "Number of Items Found in the Source: $($sourceItems.Count)"
+                $message = "Number of Items Found in the Source: $($files.Count)"
                 $this.writeMessage($message,[ColorText]::Green)
 
                 #Upload Source Items from Fileshare to Target SharePoint Online document library
                 $Counter = 1
-                foreach ($selectedFile in $sourceItems) {5
+                foreach ($selectedFile in $files) {
                         #Calculate Target Folder URL
                         $targetFolderURL = (Split-Path $selectedFile.TargetItemURL -Parent).Replace("\","/")
-                        $itemName = Split-Path $selectedFile.FullName -leaf
+                        $fileName = Split-Path $selectedFile.FullName -leaf
                             
                         #Replace Invalid Characters
-                        $itemName = [RegEx]::Replace($ItemName, "[{0}]" -f ([RegEx]::Escape([String]'\*:<>?/\|')), '_')
+                        $fileName = [RegEx]::Replace($fileName, "[{0}]" -f ([RegEx]::Escape([String]'\*:<>?/\|')), '_')
          
                         #Display Progress bar
-                        $status  = "uploading '" + $ItemName + "' to " + $TargetFolderURL +" ($($Counter) of $($SourceItems.Count))"
-                        Write-Progress -Activity "Uploading ..." -Status $Status -PercentComplete (($Counter / $SourceItems.Count) * 100)
+                        $status  = "uploading '" + $fileName + "' to " + $TargetFolderURL +" ($($Counter) of $($files.Count))"
+                        Write-Progress -Activity "Uploading ..." -Status $Status -PercentComplete (($Counter / $files.Count) * 100)
           
                         If($selectedFile.PSIsContainer)        #check if the item is a folder 
                         {
                             #Ensure Folder
-                            $folder  = Resolve-PnPFolder -SiteRelativePath ($TargetFolderURL + "/" +$ItemName)
-                            $message = "Ensured Folder '$($ItemName)' to Folder $TargetFolderURL"
+                            $folder  = Resolve-PnPFolder -SiteRelativePath ($TargetFolderURL + "/" +$fileName) -Connection $this.connection
+                            $message = "Ensured Folder '$($fileName)' to Folder $TargetFolderURL"
                             $this.writeMessage( $message, [colorText]::Green)
                         }
                         Else
                         {
-                            if ($this.uploadFile($selectedFile, $TargetFolderURL)) {
+                            if ($this.AddFileToSharePoint($selectedFile.FullName ,$targetFolderSiteRelativeURL)) {
                                 $message = "Uploaded File '$($selectedFile.FullName)' to Folder '$($TargetFolderURL.TargetItemURL)'"
                                 $this.writeMessage($message, [colorText]::Green)
                             }                         
@@ -165,42 +166,77 @@ class SharepointLibrary {
         [Int] $fileToUpload = 0
 
         # Get the list of files in the SharePoint folder
-        $sharePointFiles = Get-PnPFolderItem -FolderSiteRelativeUrl $this.sharePointFolderPath -ItemType File -Connection $this.connection
+       
+        $sourceFiles = Get-ChildItem -Path $localFolderPath -Recurse
+        $files = $sourceFiles | Select-Object FullName, PSIsContainer, LastWriteTime,  @{Label='TargetItemURL';Expression={$_.FullName.Replace($localFolderPath,$TargetFolderSiteRelativeURL).Replace("\","/")}}
+        
+        $message = "Number of Items Found in the Source: $($files.Count)"
+        $this.writeMessage($message,[ColorText]::Green)
+
 
         $this.Web = Get-PnPWeb -Connection $this.connection
         $List = Get-PnPList $libraryName -Includes RootFolder -Connection $this.connection
         $targetFolder = $list.RootFolder
-        $targetFolderSiteRelativeURL = $targetFolder.ServerRelativeURL.Replace($this.Web.ServerRelativeUrl,[string]::Empty)
-        $targetFolderSiteRelativeURL = $targetFolderSiteRelativeURL + “/" + $SubFolder
 
-
+        foreach ($selectedFile in $files) {
         # Go through each local file
-        Get-ChildItem -Path $localFolderPath -File | ForEach-Object {
-            $localFile = $_
-            
+        
+         $targetFolderURL = $targetFolder.ServerRelativeURL.Replace($this.Web.ServerRelativeUrl,[string]::Empty)
+         
+         $fileName = Split-Path $selectedFile.FullName -leaf
+         #Replace Invalid Characters
+         $fileName = [RegEx]::Replace($fileName, "[{0}]" -f ([RegEx]::Escape([String]'\*:<>?/\|')), '_')
+         $targetFolderURL = ($targetFolderURL + “/" + $SubFolder + $selectedFile.TargetItemURL).Replace("\","/")
+
+         If($selectedFile.PSIsContainer)        #check if the item is a folder 
+         { 
+             #Ensure Folder
+             $folder  = Resolve-PnPFolder -SiteRelativePath $targetFolderURL -Connection $this.connection
+             
+             if ($folder) {
+                $message = "Folder '$($fileName)' exist into Folder" + $TargetFolderURL
+                $this.writeMessage( $message, [colorText]::Yellow)
+             }else {
+                $message = "Folder '$($fileName)' created to Folder" + $TargetFolderURL
+                $this.writeMessage( $message, [colorText]::Green)
+             }
+         }
+         Else
+         {
+            $targetFileURL = Split-Path $targetFolderURL -Parent
+            $sharePointFiles = Get-PnPFolderItem -FolderSiteRelativeUrl $targetFileURL -ItemName $fileName  -Connection $this.connection
             # Search for the corresponding file on SharePoint
-            $sharePointFile = $sharePointFiles | Where-Object { $_.Name -eq $localFile.Name }
+            $sharePointFile = $sharePointFiles | Where-Object { $_.Name -eq $fileName }
             
             if ($sharePointFile) {
                 # Compare the modification dates of the files
-                $sharePointFileTime = Get-PnPProperty -ClientObject $sharePointFile -Property TimeLastModified
-                if ($sharePointFileTime -eq $localFile.LastWriteTime) {
-                    $message = "The file $($localFile.Name) has the same modification date on SharePoint and locally."
+                $sharePointFileTime = Get-PnPProperty -ClientObject $sharePointFile -Property TimeLastModified -Connection $this.connection
+                if ($sharePointFileTime -eq $selectedFile.LastWriteTime) {
+                    $message = "The file $($fileName) has the same modification date on SharePoint and locally."
                     writeMessage($message, [colorText]::Black)
-                } else {
-                    $message = "The file $($localFile.Name) has a different modification date on SharePoint and locally."
-                    writeMessage($message, [colorText]::Yellow)
+                } elseif($sharePointFileTime -cle $selectedFile.LastWriteTime) {
+                    $message = "The file $($selectedFile.Name) need to be updated on SharePoint ("+$sharePointFileTime+ ") and locally (" + $selectedFile.LastWriteTime +")."
+                    writeMessage($message, [colorText]::Red)
                 }
             } else {
-                $message = "The file $($localFile.Name) does not exist on SharePoint. Adding the file to SharePoint..."
+                $message = "The file " + $selectedFile.Name + " does not exist on SharePoint. Adding the file to SharePoint..."
                 $this.writeMessage($message, [colorText]::Yellow)
+                $this.AddFileToSharePoint($selectedFile.FullName,$targetFolderURL)
+
+                 # Get the file as a list item and update the LastWriteTime property
+                 $siteFile = Get-PnPFile -Url $targetFolderURL -AsListItem -connection $this.connection
+                 $siteFile["Modified"] = (Get-Item $selectedFile.FullName).LastWriteTime
+                 $siteFile.Update()
+ 
+                 # Invoke the PnPQuery to save the changes
+                 Invoke-PnPQuery
                 $fileToUpload++
-                $this.AddFileToSharePoint($localFile,$targetFolderSiteRelativeURL)
             }
         }
-        $this.writeMessage("$fileToUpload Files need to be uploaded ",[ColorText]::Yellow) 
+        #$this.writeMessage("$fileToUpload Files need to be uploaded ",[ColorText]::Yellow) 
+    }
         # Disconnect from SharePoint
-        Disconnect-PnPOnline
+        Disconnect-PnPOnline 
     }
 
     [void] writeMessage(
