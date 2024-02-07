@@ -73,14 +73,15 @@ class SharepointLibrary {
         #Upload File
         try {
             If($destinationFolder.StartsWith("/")) {$destinationFolder = $destinationFolder.Remove(0,1) }
-                $fileStatus  = Add-PnPFile -Path $fileManaged -Folder $destinationFolder -Connection $this.connection
-                 #possible use-> $file itself isnt null if failed, but $file.UniqueId would be null if failed
+            $fileStatus  = Add-PnPFile -Path $fileManaged -Folder $destinationFolder -Connection $this.connection
+             #possible use-> $file itself isnt null if failed, but $file.UniqueId would be null if failed
                
 
-                if ($fileStatus.UniqueId ) { 
-                    $message = "The file $($fileManaged) has been added to SharePoint in folder $($destinationfolder)."
-                    $this.writeMessage($message, [colorText]::Green)
-                    return $True }
+            if ($fileStatus.UniqueId ) { 
+                $message = "The file $($fileManaged) has been added to SharePoint in folder $($destinationfolder)."
+                $this.writeMessage($message, [colorText]::Green)
+                return $True 
+                }
                 else { return $false  } 
             }
         catch {
@@ -221,11 +222,12 @@ class SharepointLibrary {
             } else {
                 $message = "The file " + $selectedFile.Name + " does not exist on SharePoint. Adding the file to SharePoint..."
                 $this.writeMessage($message, [colorText]::Yellow)
-                $this.AddFileToSharePoint($selectedFile.FullName,$targetFolderURL)
+                $this.AddFileToSharePoint($selectedFile.FullName,$targetFileURL)
 
                  # Get the file as a list item and update the LastWriteTime property
                  $siteFile = Get-PnPFile -Url $targetFolderURL -AsListItem -connection $this.connection
-                 $siteFile["Modified"] = (Get-Item $selectedFile.FullName).LastWriteTime
+                 $localTimefile = (Get-Item $selectedFile.FullName).LastWriteTime
+                 $siteFile["Modified"] = $localTimefile
                  $siteFile.Update()
  
                  # Invoke the PnPQuery to save the changes
